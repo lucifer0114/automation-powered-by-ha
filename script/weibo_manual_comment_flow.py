@@ -79,6 +79,14 @@ TIME_SORT_ACTIVE_SELECTORS = [
     '.woo-tab-item-main[aria-selected="true"]:has-text("按时间")',
 ]
 
+PAGE_READY_SELECTORS = [
+    'article',
+    '[data-testid="comment-list"]',
+    '.WB_feed_detail',
+    '.woo-box-flex.woo-box-column',
+    'textarea',
+]
+
 
 def configure_wslg_env():
     """Make headed Chromium work reliably when launched from non-interactive WSL shells."""
@@ -177,6 +185,34 @@ def ensure_time_sort(page) -> bool:
     except Exception:
         return False
     return False
+
+
+def wait_for_page_ready(
+    page,
+    context: str,
+    readiness_selectors: list[str] | None = None,
+    networkidle_timeout: int = 10000,
+    selector_timeout: int = 2000,
+    fallback_wait_ms: int = 1200,
+):
+    try:
+        page.wait_for_load_state("networkidle", timeout=networkidle_timeout)
+        return "networkidle"
+    except PlaywrightTimeoutError:
+        pass
+
+    selectors = readiness_selectors or PAGE_READY_SELECTORS
+    locator, selector = first_visible_locator(page, selectors, timeout=selector_timeout)
+    if locator is not None:
+        return f"selector:{selector}"
+
+    if hasattr(page, "wait_for_timeout"):
+        try:
+            page.wait_for_timeout(fallback_wait_ms)
+            return "timeout-fallback"
+        except Exception:
+            pass
+    return "no-ready-signal"
 
 
 def find_comment_locator_in_root(root, comment_text: str):
@@ -409,10 +445,7 @@ def main():
 
         print(f"[2/5] Opening: {args.url}", flush=True)
         page.goto(args.url, wait_until="domcontentloaded")
-        try:
-            page.wait_for_load_state("networkidle", timeout=10000)
-        except PlaywrightTimeoutError:
-            pass
+        wait_for_page_ready(page, context="initial-load", readiness_selectors=PAGE_READY_SELECTORS, networkidle_timeout=10000)
 
         if page_requires_login(page):
             print("检测到当前页面处于登录/风控态，请先完成登录后再继续。", flush=True)
@@ -454,10 +487,13 @@ def main():
                 browser.close()
                 sys.exit(5)
             print(f"已点击提交按钮，按钮选择器: {submit_selector}", flush=True)
-            try:
-                page.wait_for_load_state("networkidle", timeout=6000)
-            except PlaywrightTimeoutError:
-                pass
+            wait_for_page_ready(
+                page,
+                context="after-submit",
+                readiness_selectors=COMMENT_ROOT_SELECTORS + LOGGED_IN_COMPOSER_SELECTORS,
+                networkidle_timeout=6000,
+                fallback_wait_ms=1500,
+            )
             if page_requires_login(page):
                 print("提交后页面进入登录/风控态，未确认评论成功发布。", flush=True)
                 browser.close()
@@ -480,10 +516,13 @@ def main():
 
         print("[4/5] Trying to locate your comment on the page...", flush=True)
         page.bring_to_front()
-        try:
-            page.wait_for_load_state("networkidle", timeout=5000)
-        except PlaywrightTimeoutError:
-            pass
+        wait_for_page_ready(
+            page,
+            context="before-locate-comment",
+            readiness_selectors=COMMENT_ROOT_SELECTORS + ['article'],
+            networkidle_timeout=5000,
+            fallback_wait_ms=1000,
+        )
         if ensure_time_sort(page):
             print("已切换评论排序到：按时间", flush=True)
         else:
