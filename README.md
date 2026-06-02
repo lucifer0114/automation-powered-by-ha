@@ -1,12 +1,12 @@
-# weibo-comment-evidence-snapshot
+# Automation powered by HA
 
-Snapshot of the Weibo comment evidence workflow, now versioned through GitHub releases for traceable reliability iterations.
+Snapshot of the comment-evidence automation workflow, versioned through GitHub releases for traceable reliability iterations.
 
 ## Included
-- Hermes skill: `skill/SKILL.md`
-- Skill references: `skill/references/*.md`
-- Playwright script: `script/weibo_manual_comment_flow.py`
-- Regression tests: `tests/*.py`
+- Hermes skill bundle under `skill/`
+- Skill references under `skill/references/`
+- Primary Playwright automation script under `script/`
+- Regression tests under `tests/`
 
 ## Purpose
 - preserve a clean standalone repo for iterative hardening
@@ -14,8 +14,8 @@ Snapshot of the Weibo comment evidence workflow, now versioned through GitHub re
 - keep script, skill notes, and regression coverage aligned
 
 ## Current release
-- Latest: [`v1.0.1`](https://github.com/lucifer0114/weibo-automation-powered-by-ha/releases/tag/v1.0.1)
-- Previous baseline: [`V1.0.0`](https://github.com/lucifer0114/weibo-automation-powered-by-ha/releases/tag/V1.0.0)
+- Latest: [`v1.0.1`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.1)
+- Previous baseline: [`V1.0.0`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/V1.0.0)
 
 ## What `v1.0.1` adds
 - structured single-line evidence output via `EVIDENCE=<json>`
@@ -44,11 +44,11 @@ python -m playwright install chromium
 ### Browser/runtime requirements
 - Chromium browser installed through `playwright install chromium`
 - On Linux, Playwright system libraries may also be required
-- A usable Weibo login session is still needed for real comment/like actions
+- A usable authenticated browser session is still needed for real comment/like actions
 
 ### Local runtime assumptions in this repo
-- default Playwright profile dir: `~/.playwright-weibo-profile`
-- default screenshot output dir: `~/outputs/weibo-comment-shots`
+- a persistent Playwright profile is expected
+- a local screenshot output directory is expected
 - the skill file still contains some environment-specific reference paths from the original Hermes workspace
 
 ## Notes
