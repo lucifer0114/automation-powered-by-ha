@@ -14,24 +14,24 @@ Snapshot of the comment-evidence automation workflow, versioned through GitHub r
 - keep script, skill notes, and regression coverage aligned
 
 ## Current release
-- Latest: `v1.0.3`
-- Prior release: [`v1.0.2`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.2)
-- Earlier milestones: [`v1.0.1`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.1), [`V1.0.0`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/V1.0.0)
+- Latest: [`v1.0.4`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.4)
+- Prior release: [`v1.0.3`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.3)
+- Earlier milestones: [`v1.0.2`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.2), [`v1.0.1`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.1), [`V1.0.0`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/V1.0.0)
 
 ## Version history
 - full release history: [CHANGELOG.md](./CHANGELOG.md)
-- latest release: `v1.0.3`
-- previous release: [`v1.0.2`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.2)
-- earlier milestones: [`v1.0.1`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.1), [`V1.0.0`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/V1.0.0)
+- latest release: [`v1.0.4`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.4)
+- previous release: [`v1.0.3`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.3)
+- earlier milestones: [`v1.0.2`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.2), [`v1.0.1`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.1), [`V1.0.0`](https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/V1.0.0)
 
-## What `v1.0.3` adds
-- syncs the current live skill bundle into the repo, including the newer reliability/reference notes
-- fixes the `capture-only` comment lookup path so time-sort refresh waits for the comment list to actually settle
-- hardens target-comment matching after switching to `按时间`, reducing false negatives on fresh comments
-- records the viewport-based red-box recovery workflow used when the first box lands on the wrong block
-- documents the tighter screenshot standard: full post body, minimal unrelated comments, exact red-box placement, and speed as a priority without relaxing correctness
+## What `v1.0.4` adds
+- adds machine-readable `TIMINGS=<json>` output so real runs can be benchmarked by phase instead of judged by feel
+- replaces the slowest fixed submit waits with readiness-based checks while keeping the capture path stable
+- hardens the submit flow with a direct DOM composer probe/recovery branch when standard locators falsely miss a live textarea
+- upgrades the default contextual crop so the publishing account header, post body, interaction row, and boxed target comment stay together in the accepted proof composition
+- expands regression coverage and planning notes for the v1.0.4 speed-and-reliability hardening cycle
 
-## Dependencies required to run `v1.0.3`
+## Dependencies required to run `v1.0.4`
 This release is a **source snapshot**, so a new machine still needs the runtime dependencies below.
 
 ### Python packages
@@ -62,4 +62,4 @@ python -m playwright install chromium
 ## Notes
 - This repository was exported from the local Hermes environment and then iterated independently
 - Runtime-specific paths inside the skill/script are intentionally preserved as-is
-- `v1.0.3` is a recoverable GitHub source backup of the current workflow baseline, not a zero-setup portable executable bundle
+- `v1.0.4` is a recoverable GitHub source backup of the current workflow baseline, not a zero-setup portable executable bundle
