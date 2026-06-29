@@ -2,6 +2,17 @@
 
 All notable changes to this repository are documented in this file.
 
+## [v1.0.3] - 2026-06-29
+
+### Changed
+- synced the repository to the current live `weibo_manual_comment_flow.py` workflow used in production runs
+- updated the regression tests to match the current script surface so the checked-in suite verifies the maintained workflow instead of an older API
+- refreshed the README so the release line, tighter screenshot standard, and speed-priority constraints are documented from the repo root
+
+### Added
+- the latest skill reference notes covering direct-textarea fallback, deferred time-sort waits, duplicate-comment handling, viewport-based red-box recovery, homepage-drift recovery, and the newer tight-crop/speed guidance
+- a `v1.0.3` source snapshot of the current stable Weibo evidence baseline for GitHub release archival
+
 ## [v1.0.2] - 2026-06-02
 
 ### Changed
@@ -31,6 +42,7 @@ All notable changes to this repository are documented in this file.
 - primary Playwright automation script under `script/`
 - baseline regression tests under `tests/`
 
+[v1.0.3]: https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.3
 [v1.0.2]: https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.2
 [v1.0.1]: https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/v1.0.1
 [V1.0.0]: https://github.com/lucifer0114/automation-powered-by-ha/releases/tag/V1.0.0

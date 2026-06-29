@@ -12,6 +12,14 @@ metadata:
 
 # Weibo Comment Evidence Workflow
 
+See `references/session-2026-06-29-tight-standard-and-speed-priority.md` for the user's current acceptance order: exact red-box correctness, full正文, minimal unrelated comments, then speed-first one-pass delivery once those are satisfied.
+See `references/session-2026-06-29-composer-false-negative-and-viewport-boxing.md` for the helper false-negative pattern (visible composer/button missed by the helper) and the viewport-based red-box recovery path used when the first screenshot boxes the wrong region.
+See `references/reliability-hardening.md` for the regression-tested guardrails around submit verification, comment-root scoping, login/risk-control detection, composer selector priority, time-sort verification, and screenshot crop normalization.
+See `references/session-2026-06-02-structured-evidence-and-final-summary.md` for the machine-readable stdout contract (`EVIDENCE=<json>` events plus `FINAL_SUMMARY=<json>`) used to make Weibo comment runs easier to verify and automate.
+See `references/session-2026-06-02-duplicate-comment-hybrid-crop.md` for the duplicate-comment capture pattern: structured card matching, same-column post-body selection, and hybrid tight-context crop rules that avoid accidentally boxing the wrong duplicate or cropping the right sidebar.
+See `references/session-2026-06-02-duplicate-comment-fast-path-regression.md` for the speed-vs-correctness lesson from the direct-contextual-clip optimization on duplicate-comment pages.
+See `references/session-2026-06-02-header-and-stats-evidence-composition.md` for the crop-composition rule that adds the posting account header (for example `黄河新闻网`) and the interaction-count row (`转发/评论/点赞`) while still keeping the boxed target comment visible.
+
 ## Overview
 
 This workflow standardizes Weibo comment automation, auto-like, and evidence capture.
@@ -43,15 +51,24 @@ Operational behavior:
 - always capture and return evidence after the comment is posted
 - do **not** introduce Browserbase / Browse.sh as the default execution backend for this workflow unless the user explicitly asks to experiment with it; this skill is optimized around the local Playwright + persistent-profile path, and backend churn is usually the wrong fix for comment verification / evidence quality problems
 - if the user wants to preserve the current behavior before reliability fixes, create an isolated snapshot repository containing only the Weibo skill assets and script (for example `SKILL.md`, `references/`, and `weibo_manual_comment_flow.py`) rather than committing unrelated changes from the broader `hermes-agent` worktree
+- when upstreaming or packaging changes from this workflow into a shared GitHub repo, default commit/PR wording to concise English; if the user asks to hide platform-specific wording, describe the work in neutral technical terms (for example evidence capture, contextual crop composition, transport handling, or local feed generation) rather than naming the platform directly
 - if login blocks progress, first obtain a *visible* QR-code login screenshot and return it to the user so they can scan it; do not send an empty page or a non-QR visitor page as login evidence
 - if clicking `去验证` opens a new tab, inspect `ctx.pages` (or equivalent page list) before assuming the verification did nothing; the active page may still be the original post tab while the captcha lives in a separate tab
 - if a browser snapshot looks empty but the page may still render a QR/login card, use a visual check before concluding the login page is unusable
 - after QR scan, re-check the live page state rather than assuming the post page is ready immediately
 - before any like / comment / capture step, explicitly verify the page is still a real post page under the expected account state, not a visitor/login page, QR/SMS auth surface, or abnormal-frequency verification panel.
 - if `--capture-only` returns `BOXED_SCREENSHOT=NOT_FOUND`, treat it as a recoverable evidence-matching problem: first retry `--submit --like --headless` on the same URL/comment before doing manual reconstruction
+- if a capture-only rerun produces a homepage/feed screenshot or other clearly wrong visual page while direct DOM/body-text checks still confirm the target post and fresh comment, classify it as helper page-state drift rather than comment loss; reopen the post in a fresh persistent-context page, verify the comment again under `按时间`, then recover the deliverable from a newly captured verified full-page screenshot plus a manual crop/red-box pass. See `references/session-2026-06-29-homepage-drift-manual-evidence-recovery.md`.
 - if the page definitely contains the comment in the DOM but locator text matching fails, switch to a DOM probe (`document.querySelectorAll('*')` / `innerText` scan) to recover the exact node and its bounding box, then crop from the full-page raw screenshot around that anchor
 - keep separate logic for opening/expanding the comment area versus submitting the filled comment. A broad `评论` locator reused for both steps is too fragile on Weibo pages and can create false submit success.
 - when matching a posted comment for evidence, search inside verified comment-list / comment-card regions first and exclude editable composer areas; avoid whole-page `.first` matches that can lock onto the composer or unrelated duplicate text.
+- on duplicate-comment threads, prefer structured comment-card matching (`.item1`, `.wbpro-scroller-item`, `.item1in`, `.con1`) before generic `text=` hits, and rank the topmost `按时间` result with today's timestamp above older duplicates.
+- when selecting the post-body area for a contextual crop, constrain candidates to the same content column as the matched comment and prefer `.wbpro-feed-content` over broad `.woo-panel-main` containers, which can accidentally resolve to the right sidebar / hot-search rail.
+- if a reliability fix makes the screenshot noticeably looser or uglier, do not stop at "correct enough": keep the safer comment match, but retune margins / crop composition so the final artifact stays tight and screenshot-faithful.
+- when the evidence image needs stronger post provenance or the user asks to match a preferred prior composition, widen the vertical crop so it includes the posting account header (for example `黄河新闻网`) and the interaction row with `转发 / 评论 / 点赞` counts, while still preserving the comment area and the red-boxed target comment.
+- if a contextual crop includes the post body and comment but omits either the account header or the interaction-count row, treat that as an incomplete composition for this workflow and retune the crop before delivery.
+- when reworking crop speed paths, do not anchor only on the正文 text block if that would cut off the header or interaction row; verify the final crop against the whole post card composition, not just the matched comment box.
+- if fixed overlays or floating site chrome intrude on the interaction row, hide or compensate for them before taking the final deliverable so the counts remain readable.
 - if the script still cannot match the comment text, use the raw screenshot for visual diagnosis by slicing it into vertical bands and building a contact sheet, then narrow the likely comment region with vision before retrying
 - when reconstructing evidence manually, prefer a contextual crop that preserves the post body, the comment composer, and only the relevant portion of the thread; avoid crops that show only the interaction bar or only the target comment
 - do not trust a stale `browser_snapshot()` alone after a background run; re-open the URL or use a fresh page check to confirm the live state
@@ -64,15 +81,23 @@ Operational behavior:
 Headless comment-composer pitfall:
 - Some Weibo pages expose the composer immediately, while others only reveal it after clicking the visible `评论` button. In headless automation, try `textarea[placeholder="发布你的评论"]` first; if it is absent or hidden, click `评论`, wait briefly, then retry the textarea.
 - If the helper says it cannot find the composer but `body.innerText` / DOM inspection shows the textarea exists, bypass the helper and target `textarea[placeholder="发布你的评论"]` directly; the button may be present but visually disabled while still clickable.
+- If the helper reports no composer on a page whose post body still clearly matches the requested Weibo, do a direct persistent-profile reprobe before giving up: reopen the URL, confirm the body text again, inspect `textarea[placeholder="发布你的评论"]` and generic `textarea`, then submit with `button:has-text("评论")` / `force=True` if fill succeeded. This recovery path was validated on the `中国妇女报` post about the teacher wearing students' medals.
 - If the page body already proves the target post is correct and the composer exists, do not spend time chasing the helper’s locator path—switch to direct DOM interaction and verify by the new comment appearing in `按时间` order under the current account.
+- A direct DOM reprobe can reveal that the local helper falsely missed a visible composer/button even though `textarea[placeholder="发布你的评论"]` and `button:has-text("评论")` were both live. When that happens, bypass the helper for the actual run instead of retrying the same helper path.
+- For this user, a screenshot is not acceptable merely because the right comment exists somewhere in frame: before delivery, verify that the red box encloses the exact target comment. If the crop/box is disputed, rebuild from stable viewport coordinates (`bounding_box()` / visible viewport screenshot) and re-verify instead of defending the first artifact.
 - if the helper says it cannot find the composer but `body.innerText`/DOM inspection shows the textarea exists, bypass the helper and target `textarea[placeholder="发布你的评论"]` directly; the button may be present but visually disabled while still clickable.
+- a direct DOM reprobe can reveal that the local helper falsely missed a visible composer/button even though `textarea[placeholder="发布你的评论"]` and `button:has-text("评论")` were both live. When that happens, bypass the helper for the actual run instead of retrying the same helper path.
+- for this user, a screenshot is not acceptable merely because the right comment exists somewhere in frame: before delivery, verify that the red box encloses the exact target comment. If the crop/box is disputed, rebuild from stable viewport coordinates (`bounding_box()` / visible viewport screenshot) and re-verify instead of defending the first artifact.
 - if the textarea fills successfully but the submit button still keeps a `disabled` class, do **not** assume submission is blocked. On this page family, a forced click on the visible `评论` button (`click(force=True)`) can still submit successfully; verify the new comment appears under the current account after sorting by `按时间`.
 - on some video posts, the page can show a player/modal UI while the comment composer is still present in the DOM; if the helper misses the composer, inspect the live DOM for the textarea and submit button instead of assuming the post is unusable.
 - `textarea[placeholder="发布你的评论"]` first; if it is absent or hidden, click `评论`, wait briefly, then retry the textarea.
 - If the textarea exists but `wait_for(state="visible")` stalls, do not assume the composer is absent: scroll a bit more and/or click the visible `评论` control to expand the composer, then retry.
+- If the placeholder-specific locator (for example `textarea[placeholder="发布你的评论"]`) keeps stalling but a generic `textarea` probe shows a visible element with a real bounding box, bypass the placeholder path and type into the generic textarea directly.
+- If `get_by_text("评论")` or a text/span-based click path times out because the element looks disabled, do not assume submission is impossible; target the real `button:has-text("评论")` control instead.
 - If the first fill attempt fails, retry after the click + short wait before giving up.
 - After filling, the submit button may still look disabled; on some pages `button:has-text("评论")` still posts successfully when clicked with `force=True`.
 - Do not rely on `input()` pauses for manual recovery in headless runs; they will raise `EOFError` in non-interactive shells. Use an automatic retry path.
+- See `references/session-2026-06-02-direct-textarea-force-submit-fallback.md` for the concrete page family where the generic textarea + force-submit path succeeded after the placeholder-specific wait and text-node click path both looked blocked.
 - If a comment seems to submit but disappears on reload, do not treat that as final failure until you have re-opened the page, switched to `按时间`, and re-checked the live list; capture-only can still find the fresh comment once the comment tree settles.
 
 - if `--capture-only` returns `BOXED_SCREENSHOT=NOT_FOUND` even though the comment was just submitted, do not assume the post failed. Re-open the live page, switch to `按时间`, and verify via `body.innerText` or a fresh DOM scan that includes the current account name and the recent timestamp.
@@ -103,16 +128,20 @@ Login recovery notes:
 - See `references/session-2026-05-10-captcha-tab-and-drag-verification.md` for the separate-tab verification pattern after clicking `去验证`.
 
 User-specific delivery defaults:
-User-specific delivery defaults:
 - when a comment is posted, always return the proof screenshot in the same response
 - prefer the contextual boxed screenshot (`*_context_boxed.png`) as the primary artifact
 - keep the evidence crop tight and unambiguous; avoid marginal or loosely boxed screenshots that only “roughly” cover the target comment
+- by default, prefer a composition that shows the posting account header (for example `黄河新闻网`), the post body, the interaction/status row (`转发 / 评论 / 点赞`, such as `45 / 3042 / 4481`), and the relevant portion of the comment thread together; if one of those proof layers is missing, treat the crop as incomplete unless the user explicitly asked for a tighter slice
 - the proof screenshot must include both the original post body and the relevant comment area; do not deliver a comment-only crop unless the user explicitly asks for it
 - if the user later says a post was not liked, correct it by liking first and then re-capturing the screenshot
 - if the target comment is not visible as an exact text hit, do not reuse a guessed crop; re-open, switch to `按时间`, and verify the live DOM/body text again before cropping
 - preferred fast path (accepted by user): like first, submit the comment, then generate one tight contextual evidence screenshot containing both正文和评论; if that image is already clear enough, deliver it directly without extra proof iterations
 - if the contextual crop is readable, keep it as the primary deliverable; use a full-page boxed screenshot only as a secondary/debug artifact or when the contextual crop is too tight, blurry, or ambiguous
 - only do a second pass when the first boxed contextual image is visibly too loose, cropped poorly, ambiguous, or missing正文/评论中的任一部分
+- once the user has accepted the general screenshot quality direction, shift optimization priority to speed: choose posts with stable composer layout and cleaner comment areas, avoid unnecessary second-pass rebuilds, and deliver the first screenshot that already satisfies the tight standard.
+- the user’s current preferred tight standard is: full post body visible, unrelated comments minimized, red box exactly on the target comment, and no obvious testing traces in the posted text.
+- before delivery, explicitly treat “red box on the exact target comment” as a hard acceptance gate; a roughly nearby box is not acceptable even if the right comment is somewhere in frame.
+- when possible, prefer a post whose natural layout makes one-pass capture easy (clean body, shallow thread, visible composer) over a noisier post that is harder to crop tightly.
 
 If a posted comment is off-topic or the user asks for a different voice, re-read the post text and replace the comment with a corrected version before capturing evidence. See `references/comment-tone-and-rollback.md` for the rollback + tone ladder.
 
@@ -157,6 +186,19 @@ Do not use when:
 - the user has not completed the external QR-code login step at least once in the persistent profile
 - you need a brand-new browser/profile instead of the seeded persistent profile
 - the requested comment tone is not yet aligned with the post topic; in that case, inspect the post text first and generate a corrected comment before posting
+
+## Subsection: automation hardening and false-success prevention
+
+This umbrella also absorbs the narrower hardening playbook for Weibo Playwright automation.
+
+Core hardening rules:
+- never treat a clicked button as proof of comment submission
+- keep comment-panel opening separate from final submit-button logic
+- scope comment matching to real comment containers, not the whole page
+- check login/risk-control state after navigation, after submit, and before final evidence capture
+- fail closed with an honest diagnostic artifact when success cannot be verified
+
+These guardrails apply to every post/like/capture flow under this umbrella, not as a separate top-level skill.
 
 ## Standard Output Contract
 
@@ -208,11 +250,16 @@ Default behavior for this user:
 - capture the contextual boxed screenshot
 - return only the boxed/contextual image unless the user asks for more
 
+Fast-path optimization:
+- when the surrounding workflow would otherwise do `capture-only` first and then fall back to a second `submit` run, prefer a single browser session with `--capture-first-submit-fallback`
+- this flag first tries to reuse an existing exact-match comment and capture it; only if that fails does it continue into comment submission and final evidence capture
+- use it when the same post/comment may already exist and you want to avoid paying for two separate browser launches
+
 ```bash
 python3 /home/aimashi/spikes/weibo_manual_comment_flow.py \
   --url 'https://weibo.com/<post>' \
   --comment '你的评论文本' \
-  --submit --like
+  --submit --like --capture-first-submit-fallback
 ```
 
 Expected behavior:
@@ -230,7 +277,21 @@ Pitfall:
 - A visible `评论` composer does not guarantee submission success if the account is under an abnormal-frequency action restriction; check for the banner and use verification / re-auth instead of repeated submits.
 - if `comments/create` returns `400` with `由于对方的设置，你不能评论哦！`, treat it as a follow/privacy gate first: follow the author if needed, refresh/re-open the composer, then retry a short distinctive comment before changing the text again.
 - `networkidle` is only a weak readiness hint on Weibo pages; prefer concrete DOM conditions such as: main post visible, comment area expanded, composer editable, `按时间` switch confirmed, and the newest comment item actually present.
+- when hardening the local script, centralize these waits in a helper like `wait_for_page_ready()` so page-open, post-submit, and pre-crop phases all share the same fallback policy (`networkidle` → concrete selector(s) → short timeout fallback).
+- user-accepted fast path for this workflow: on submit runs, try the composer first (`textarea[placeholder="发布你的评论"]`) before clicking `评论`; only expand via the visible `评论` control if the textarea is absent/hidden. After fill, prefer a short settle + verification pass over a long unconditional `networkidle` wait.
+- keep `按时间` switching as a retry step, not a default precondition: first try to find the fresh comment in the current view, then switch to `按时间` only if the first lookup misses.
+- after switching to `按时间`, do not rely on a tiny fixed sleep (for example ~450ms). Wait for the comment list to refresh with a concrete readiness check (`networkidle`, visible comment-card selectors, or `body.innerText` containing the target comment) before declaring capture-only failed.
+- when shaving runtime, cut fixed sleeps first (for example after like / panel-open / submit) and preserve reliability by pairing the shorter waits with explicit fallback checks rather than removing verification.
+- direct contextual clipping (capture the computed crop box immediately instead of full-page-then-recropping) is a valid optimization, but only keep it as the default if visual verification still passes on duplicate-comment pages.
+- on pages where the same comment text may appear multiple times, do not anchor evidence from the first text hit alone. Prefer comment-card/container matching scored by author + fresh timestamp/day marker + topmost position after `按时间` when needed, then draw the box from that card's own bounds.
+- if a faster matching/cropping path produces any of these regressions — wrong duplicate comment boxed, post body missing, or oversized/loose red box — treat the optimization as incomplete and fall back to the slower verified branch until correctness is restored.
+- if a faster matching/cropping path produces any of these regressions — wrong duplicate comment boxed, post body missing, or oversized/loose red box — treat the optimization as incomplete and fall back to the slower verified branch until correctness is restored.
 - If you compute screenshot boxes from DOM coordinates and then take a full-page screenshot, re-check layout stability first; lazy rendering and reflow can shift the target and make the red box misleading.
+- If the delivered boxed image shows the red rectangle on the wrong comment/UI block even though the target text was found correctly, do not trust the first crop. Re-open the post, switch to `按时间`, scroll so the whole post card is visible in one viewport, and regenerate the deliverable from live *viewport* bounding boxes (prefer the real comment text/container such as `.con1` / `.text`, not a lower summary block). Verify the boxed image visually before sending.
+- For this user’s preferred tighter style, the final composition should show the full post body while minimizing unrelated comments; when possible crop from the article top to just below the target comment card, rather than keeping a taller thread slice.
+
+See `references/session-2026-06-02-fast-path-waits-and-deferred-sort.md` for the concrete timing reductions and fallback order that brought capture-only validation down to about eight seconds without removing the safety checks.
+See `references/session-2026-06-29-composer-false-negative-and-viewport-boxing.md` for the helper false-negative pattern and the tight viewport-crop recovery path.
 
 If the user asks for a more casual or ordinary-user tone, prefer a short conversational comment over polished media-copy phrasing. See `references/comment-tone-and-rollback.md`.
 
@@ -257,6 +318,8 @@ python3 /home/aimashi/spikes/weibo_manual_comment_flow.py \
 ## Expected Output Fields
 
 The script prints:
+- `EVIDENCE=<json>` for machine-readable wait / like / submission events during the run
+- `FINAL_SUMMARY=<json>` at the end of the run so downstream tooling can read the final status without scraping the full log
 - `LIKE_STATUS=...` when `--like` is used
 - `PRIMARY_MODE=contextual` by default
 - `RAW_SCREENSHOT=...` → primary raw artifact
@@ -265,6 +328,8 @@ The script prints:
 - `FULL_BOXED_SCREENSHOT=...`
 - `CONTEXT_RAW_SCREENSHOT=...`
 - `CONTEXT_BOXED_SCREENSHOT=...`
+
+See `references/structured-output-contract.md` for the recommended interpretation of `EVIDENCE` and `FINAL_SUMMARY` lines.
 
 Interpretation:
 - by default, `RAW_SCREENSHOT` and `BOXED_SCREENSHOT` point to the contextual crop
