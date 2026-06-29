@@ -57,12 +57,19 @@ class FakePage:
     def __init__(self, selectors=None):
         self.selectors = selectors or {}
         self.waits = []
+        self.eval_map = {}
 
     def locator(self, selector):
         return self.selectors.get(selector, FakeLocator(selector, count=0, visible=False))
 
     def wait_for_timeout(self, ms):
         self.waits.append(ms)
+
+    def evaluate(self, js, arg=None):
+        if js in self.eval_map:
+            value = self.eval_map[js]
+            return value(arg) if callable(value) else value
+        raise RuntimeError(f"unexpected evaluate: {js[:40]}")
 
 
 def test_fill_comment_box_uses_visible_textarea_first():
@@ -125,3 +132,22 @@ def test_ensure_post_liked_clicks_and_returns_liked_now():
     assert state["countClass"].endswith("woo-like-liked")
     assert like.clicked == 1
     assert page.waits == [700]
+
+
+def test_fill_comment_box_uses_dom_probe_fallback_when_standard_locators_false_negative():
+    page = FakePage({
+        'textarea[placeholder="发布你的评论"]': FakeLocator("placeholder", count=1, visible=False),
+        'textarea': FakeLocator("generic", count=0, visible=False),
+        '[contenteditable="true"]': FakeLocator("editable", count=0, visible=False),
+        'div[role="textbox"]': FakeLocator("textbox", count=0, visible=False),
+        'div[contenteditable="plaintext-only"]': FakeLocator("plaintext", count=0, visible=False),
+    })
+    direct = FakeLocator("direct-dom")
+    page.selectors['textarea[data-hermes-direct-composer="1"]'] = direct
+    page.eval_map[weibo_flow.DOM_COMPOSER_PROBE_JS] = True
+
+    locator, selector = weibo_flow.fill_comment_box(page, "测试评论")
+
+    assert locator is direct
+    assert selector == 'textarea[data-hermes-direct-composer="1"]'
+    assert direct.filled == ["测试评论"]

@@ -2,6 +2,17 @@
 
 All notable changes to this repository are documented in this file.
 
+## [Unreleased / v1.0.4]
+
+### Changed
+- hardened the submit path against composer false negatives by adding a direct DOM composer probe/recovery branch when standard locators miss a live textarea
+- widened the default contextual crop upward so the publishing account/header is included together with the post body, interaction row, and boxed target comment
+- kept the faster v1.0.4 wait strategy while folding in the real smoke-run lesson from the `黄河新闻网` post recovery
+
+### Added
+- regression coverage for the direct DOM composer fallback when visible composer controls are missed by the helper path
+- regression coverage for the header-inclusive crop-box computation used by the contextual screenshot path
+
 ## [v1.0.3] - 2026-06-29
 
 ### Changed

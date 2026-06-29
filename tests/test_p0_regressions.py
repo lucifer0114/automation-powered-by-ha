@@ -73,16 +73,16 @@ class FakePage:
         return self.sort_button
 
 
-def test_wait_for_time_sort_refresh_returns_true_when_comment_appears():
+def test_wait_for_time_sort_refresh_returns_fast_phase_when_comment_appears_early():
     page = FakePage(["still loading", "目标评论 已出现"])
-    assert weibo_flow.wait_for_time_sort_refresh(page, "目标评论") is True
-    assert page.waits[:2] == [350, 800]
+    assert weibo_flow.wait_for_time_sort_refresh(page, "目标评论") == "after-time-sort-fast"
+    assert page.waits[:2] == [180, 420]
 
 
 def test_wait_for_time_sort_refresh_returns_false_when_comment_never_appears():
     page = FakePage(["a", "b", "c"])
     assert weibo_flow.wait_for_time_sort_refresh(page, "目标评论") is False
-    assert page.waits == [350, 800, 1400]
+    assert page.waits == [180, 420, 900]
 
 
 def test_locate_comment_returns_direct_match(monkeypatch):
@@ -100,7 +100,7 @@ def test_locate_comment_returns_direct_match(monkeypatch):
     assert phase == "direct"
 
 
-def test_locate_comment_switches_to_time_sort_when_direct_match_misses(monkeypatch):
+def test_locate_comment_switches_to_time_sort_and_short_circuits_when_refresh_phase_hits(monkeypatch):
     page = FakePage([])
     target = object()
     calls = []
@@ -112,12 +112,12 @@ def test_locate_comment_switches_to_time_sort_when_direct_match_misses(monkeypat
         return target, ".item1 [structured 0]"
 
     monkeypatch.setattr(weibo_flow, "find_comment_locator", fake_find)
-    monkeypatch.setattr(weibo_flow, "wait_for_time_sort_refresh", lambda _p, _t=None: True)
+    monkeypatch.setattr(weibo_flow, "wait_for_time_sort_refresh", lambda _p, _t=None: "after-time-sort-fast")
 
     locator, selector, phase = weibo_flow.locate_comment(page, "目标评论")
 
     assert locator is target
     assert selector == ".item1 [structured 0]"
-    assert phase == "after-time-sort"
+    assert phase == "after-time-sort-fast"
     assert page.sort_button.clicked == 1
-    assert page.mouse.wheels[0] == (0, -1200)
+    assert page.mouse.wheels == [(0, -1200)]

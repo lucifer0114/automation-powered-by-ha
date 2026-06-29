@@ -138,10 +138,10 @@ User-specific delivery defaults:
 - preferred fast path (accepted by user): like first, submit the comment, then generate one tight contextual evidence screenshot containing both正文和评论; if that image is already clear enough, deliver it directly without extra proof iterations
 - if the contextual crop is readable, keep it as the primary deliverable; use a full-page boxed screenshot only as a secondary/debug artifact or when the contextual crop is too tight, blurry, or ambiguous
 - only do a second pass when the first boxed contextual image is visibly too loose, cropped poorly, ambiguous, or missing正文/评论中的任一部分
-- once the user has accepted the general screenshot quality direction, shift optimization priority to speed: choose posts with stable composer layout and cleaner comment areas, avoid unnecessary second-pass rebuilds, and deliver the first screenshot that already satisfies the tight standard.
-- the user’s current preferred tight standard is: full post body visible, unrelated comments minimized, red box exactly on the target comment, and no obvious testing traces in the posted text.
-- before delivery, explicitly treat “red box on the exact target comment” as a hard acceptance gate; a roughly nearby box is not acceptable even if the right comment is somewhere in frame.
-- when possible, prefer a post whose natural layout makes one-pass capture easy (clean body, shallow thread, visible composer) over a noisier post that is harder to crop tightly.
+- once the user has accepted the general screenshot quality direction, shift optimization priority to speed by reducing workflow overhead: avoid unnecessary second-pass rebuilds and deliver the first screenshot that already satisfies the tight standard.
+- the user’s current preferred tight standard is: publishing account header visible, full post body visible, unrelated comments minimized, red box exactly on the target comment, and no obvious testing traces in the posted text.
+- before delivery, explicitly treat “red box on the exact target comment” and “发文主体在画面内” as hard acceptance gates.
+- future runs will usually come with an exact user-supplied Weibo link, so speed work must happen inside the stable like → comment → header-inclusive tight-crop evidence pipeline rather than by choosing easier posts.
 
 If a posted comment is off-topic or the user asks for a different voice, re-read the post text and replace the comment with a corrected version before capturing evidence. See `references/comment-tone-and-rollback.md` for the rollback + tone ladder.
 

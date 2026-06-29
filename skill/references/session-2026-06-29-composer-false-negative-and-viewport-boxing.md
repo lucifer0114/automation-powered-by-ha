@@ -34,23 +34,22 @@ Recovery pattern:
 
 This is safer than mixing document-space coordinates from one layout phase with screenshots from another layout phase.
 
-### 3) Tighter composition rule for this user
-The user rejected screenshots where:
-- the post body was not fully visible
-- too many unrelated comments were shown above/below the target comment
+### 4) Header-inclusive composition is the new default
+For this user's current acceptance bar, a screenshot is incomplete if it shows only the post body + comment but cuts off the publishing account/header.
 
-Accepted composition target:
+Accepted composition target now is:
+- publishing account header visible
 - full post body visible
-- interaction row visible
+- interaction row visible when layout allows it
 - only a small slice of the comment area
 - red box on the exact target comment
 
-A practical crop for this style is:
-- horizontal bounds: article left/right ± small padding
-- top: article top − small padding
+A practical default crop for this style is:
+- horizontal bounds: article/shell left/right ± small padding
+- top: high enough to include the publishing account header, not just the正文 block
 - bottom: target comment card bottom + small padding
 
-When possible, prefer the first visible target comment after `按时间` and crop no lower than necessary.
+If the first crop misses the header, treat it as incomplete and rebuild before delivery.
 
 ## Concrete pattern
 When the target comment is already visible in the same viewport as the full post card:

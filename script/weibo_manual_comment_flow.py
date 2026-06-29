@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import os
 import re
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +30,67 @@ CONTEXT_CROP_BOTTOM_PADDING = 44
 FALLBACK_ARTICLE_SIDE_PADDING = 40
 FALLBACK_ARTICLE_LOOKBACK = 500
 FALLBACK_ARTICLE_BOTTOM_PADDING = 80
+POST_HEADER_LOOKBACK = 165
+
+DOM_COMPOSER_PROBE_JS = """
+() => {
+    document.querySelectorAll('[data-hermes-direct-composer="1"]').forEach(el => {
+        el.removeAttribute('data-hermes-direct-composer');
+    });
+    const candidates = [
+        ...Array.from(document.querySelectorAll('textarea[placeholder="发布你的评论"]')),
+        ...Array.from(document.querySelectorAll('textarea')),
+        ...Array.from(document.querySelectorAll('[contenteditable="true"]')),
+        ...Array.from(document.querySelectorAll('div[role="textbox"]')),
+        ...Array.from(document.querySelectorAll('div[contenteditable="plaintext-only"]')),
+    ];
+    for (const el of candidates) {
+        const r = el.getBoundingClientRect();
+        if (r.width <= 40 || r.height <= 12) continue;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') continue;
+        el.setAttribute('data-hermes-direct-composer', '1');
+        return true;
+    }
+    return false;
+}
+"""
+
+TIMING_KEYS = [
+    "open_url_ms",
+    "initial_ready_ms",
+    "open_composer_ms",
+    "fill_comment_ms",
+    "submit_wait_ms",
+    "locate_comment_ms",
+    "capture_artifacts_ms",
+    "total_ms",
+]
+
+
+def now_ms() -> int:
+    return int(time.perf_counter() * 1000)
+
+
+def build_timings_payload(timings: dict | None = None, total_ms: int | float | None = None):
+    payload = {key: 0 for key in TIMING_KEYS}
+    payload.update(timings or {})
+    if total_ms is not None:
+        payload["total_ms"] = total_ms
+    for key in TIMING_KEYS:
+        value = payload.get(key, 0)
+        if not isinstance(value, (int, float)):
+            payload[key] = 0
+    return payload
+
+
+def print_timings(timings: dict | None = None, started_ms: int | None = None):
+    total_ms = None
+    if started_ms is not None:
+        total_ms = max(now_ms() - started_ms, 0)
+    payload = build_timings_payload(timings, total_ms=total_ms)
+    print(f"TIMINGS={json.dumps(payload, ensure_ascii=False, sort_keys=True)}", flush=True)
+    return payload
 
 
 def configure_wslg_env():
@@ -252,6 +315,69 @@ def wait_for_page_ready(page, timeout_ms: int = 4000):
     return "timeout-fallback"
 
 
+def wait_for_first_visible_selector(page, selectors: list[str], timeout_ms: int = 1200):
+    for selector in selectors:
+        locator = page.locator(selector).first
+        try:
+            if locator.count() == 0:
+                continue
+            locator.wait_for(state="visible", timeout=timeout_ms)
+            return selector
+        except Exception:
+            continue
+    return None
+
+
+def wait_for_comment_composer_ready(page, timeout_ms: int = 1200):
+    return wait_for_first_visible_selector(
+        page,
+        [
+            '[data-testid="comment-composer"] textarea',
+            '[data-testid="comment-composer"] [contenteditable="true"]',
+            'textarea[placeholder="发布你的评论"]',
+            'textarea',
+            '[contenteditable="true"]',
+            'div[role="textbox"]',
+            'div[contenteditable="plaintext-only"]',
+        ],
+        timeout_ms=timeout_ms,
+    )
+
+
+def wait_for_after_submit_signal(page, comment_text: str | None = None, fallback_wait_ms: int = 650):
+    checkpoints = [180, 420]
+    last_selector = None
+    for delay in checkpoints:
+        page.wait_for_timeout(delay)
+        try:
+            page.wait_for_load_state("networkidle", timeout=900)
+            return "networkidle"
+        except Exception:
+            pass
+        selector = wait_for_first_visible_selector(
+            page,
+            [
+                '[data-testid="comment-list"]',
+                '.wbpro-list, .item1, .vue-recycle-scroller__item-view',
+            ],
+            timeout_ms=700,
+        )
+        last_selector = selector or last_selector
+        if comment_text:
+            try:
+                body_text = page.locator('body').inner_text(timeout=900)
+                if comment_text in body_text:
+                    return "comment-visible"
+            except Exception:
+                pass
+        elif selector:
+            return f"selector:{selector}"
+    if last_selector:
+        return f"selector:{last_selector}"
+    page.wait_for_timeout(fallback_wait_ms)
+    return "timeout-fallback"
+
+
 def draw_red_box(raw_path: Path, boxed_path: Path, box: dict):
     image = Image.open(raw_path).convert("RGB")
     draw = ImageDraw.Draw(image)
@@ -378,22 +504,22 @@ def find_post_body_box(page, highlight_box: dict):
 
 
 def wait_for_time_sort_refresh(page, comment_text: str | None = None):
-    checkpoints = [350, 800, 1400]
-    for delay in checkpoints:
+    checkpoints = [180, 420, 900]
+    for idx, delay in enumerate(checkpoints):
         page.wait_for_timeout(delay)
         try:
-            page.wait_for_load_state("networkidle", timeout=1200)
+            page.wait_for_load_state("networkidle", timeout=900)
         except Exception:
             pass
         try:
-            page.locator('.wbpro-list, .item1, .vue-recycle-scroller__item-view').first.wait_for(state="visible", timeout=1200)
+            page.locator('.wbpro-list, .item1, .vue-recycle-scroller__item-view').first.wait_for(state="visible", timeout=900)
         except Exception:
             pass
         if comment_text:
             try:
-                body_text = page.locator('body').inner_text(timeout=1200)
+                body_text = page.locator('body').inner_text(timeout=900)
                 if comment_text in body_text:
-                    return True
+                    return "after-time-sort-fast" if idx < len(checkpoints) - 1 else "after-time-sort-final"
             except Exception:
                 pass
     return False
@@ -410,15 +536,16 @@ def locate_comment(page, comment_text: str, allow_time_sort_retry: bool = True):
             page.wait_for_timeout(200)
         except Exception:
             pass
+        refresh_phase = False
         try:
             page.get_by_text("按时间").first.click(timeout=1500, force=True)
-            wait_for_time_sort_refresh(page, comment_text)
+            refresh_phase = wait_for_time_sort_refresh(page, comment_text)
             print("已切换评论排序到：按时间", flush=True)
         except Exception:
             print("未能切换到“按时间”，将按当前排序继续查找。", flush=True)
         locator, selector = find_comment_locator(page, comment_text)
         if locator is not None:
-            return locator, selector, "after-time-sort"
+            return locator, selector, refresh_phase or "after-time-sort"
 
     try:
         page.mouse.wheel(0, 900)
@@ -496,6 +623,72 @@ def save_clipped_contextual_screenshot(page, focused_raw_path: Path, focused_box
     cropped.save(focused_boxed_path)
 
 
+def can_use_viewport_context_capture(page, crop_box: dict):
+    try:
+        viewport = page.evaluate(
+            """
+            () => ({
+                scrollX: window.scrollX,
+                scrollY: window.scrollY,
+                innerWidth: window.innerWidth,
+                innerHeight: window.innerHeight,
+            })
+            """
+        )
+    except Exception:
+        return False
+    if not viewport:
+        return False
+    left = viewport.get("scrollX", 0)
+    top = viewport.get("scrollY", 0)
+    right = left + viewport.get("innerWidth", 0)
+    bottom = top + viewport.get("innerHeight", 0)
+    return (
+        crop_box["x"] >= left
+        and crop_box["y"] >= top
+        and crop_box["right"] <= right
+        and crop_box["bottom"] <= bottom
+    )
+
+
+def compute_context_crop_box(framing_box: dict, article_box: dict, highlight_box: dict):
+    header_top = max(article_box['y'] - POST_HEADER_LOOKBACK, 0)
+    crop_top = min(framing_box['y'], article_box['y'], highlight_box['y'], header_top)
+    return {
+        'x': max(min(framing_box['x'], article_box['x'], highlight_box['x']) - CONTEXT_CROP_SIDE_PADDING, 0),
+        'y': max(crop_top - CONTEXT_CROP_TOP_PADDING, 0),
+        'right': max(framing_box['right'], article_box['right'], highlight_box['right']) + CONTEXT_CROP_SIDE_PADDING,
+        'bottom': highlight_box['bottom'] + CONTEXT_CROP_BOTTOM_PADDING,
+    }
+
+
+def probe_direct_dom_composer(page):
+    try:
+        matched = page.evaluate(DOM_COMPOSER_PROBE_JS)
+    except Exception:
+        return None, None
+    if not matched:
+        return None, None
+    locator = page.locator('textarea[data-hermes-direct-composer="1"]').first
+    try:
+        if locator.count() > 0:
+            return locator, 'textarea[data-hermes-direct-composer="1"]'
+    except Exception:
+        pass
+    for selector in [
+        '[contenteditable="true"][data-hermes-direct-composer="1"]',
+        'div[role="textbox"][data-hermes-direct-composer="1"]',
+        'div[contenteditable="plaintext-only"][data-hermes-direct-composer="1"]',
+    ]:
+        locator = page.locator(selector).first
+        try:
+            if locator.count() > 0:
+                return locator, selector
+        except Exception:
+            continue
+    return None, None
+
+
 def capture_comment_artifacts(page, locator, matched_selector: str, article_fallback_selector: str, raw_path: Path, boxed_path: Path, focused_raw_path: Path, focused_boxed_path: Path, full_page_primary: bool = False):
     try:
         locator.scroll_into_view_if_needed(timeout=2500)
@@ -539,16 +732,7 @@ def capture_comment_artifacts(page, locator, matched_selector: str, article_fall
         article_selector = article_fallback_selector
 
     framing_box = shell_box or article_box
-    # Keep the contextual proof crop anchored to the whole post card, not just the
-    # comment box. This helps preserve the account header and the interaction/status
-    # row above the boxed target comment, which the user treats as part of the proof.
-    crop_top = min(framing_box['y'], article_box['y'], highlight_box['y'])
-    crop_box = {
-        'x': max(min(framing_box['x'], article_box['x'], highlight_box['x']) - CONTEXT_CROP_SIDE_PADDING, 0),
-        'y': max(crop_top - CONTEXT_CROP_TOP_PADDING, 0),
-        'right': max(framing_box['right'], article_box['right'], highlight_box['right']) + CONTEXT_CROP_SIDE_PADDING,
-        'bottom': highlight_box['bottom'] + CONTEXT_CROP_BOTTOM_PADDING,
-    }
+    crop_box = compute_context_crop_box(framing_box, article_box, highlight_box)
 
     if full_page_primary:
         print("[5/5] Saving full-page screenshot...", flush=True)
@@ -567,13 +751,18 @@ def capture_comment_artifacts(page, locator, matched_selector: str, article_fall
         context_boxed_value = str(focused_boxed_path.resolve())
         primary_mode = "full_page"
     else:
-        print("[5/5] Saving full-page base screenshot for tight contextual crop...", flush=True)
         hide_overlay_chrome(page)
-        page.screenshot(path=str(raw_path), full_page=True)
-        save_contextual_crop(raw_path, focused_raw_path, focused_boxed_path, crop_box, highlight_box)
+        if can_use_viewport_context_capture(page, crop_box):
+            print("[5/5] Saving viewport-clipped contextual screenshot...", flush=True)
+            save_clipped_contextual_screenshot(page, focused_raw_path, focused_boxed_path, crop_box, highlight_box)
+            full_raw_value = "NOT_CAPTURED"
+        else:
+            print("[5/5] Saving full-page base screenshot for tight contextual crop...", flush=True)
+            page.screenshot(path=str(raw_path), full_page=True)
+            save_contextual_crop(raw_path, focused_raw_path, focused_boxed_path, crop_box, highlight_box)
+            full_raw_value = str(raw_path.resolve())
         primary_raw_path = focused_raw_path.resolve()
         primary_boxed_path = focused_boxed_path.resolve()
-        full_raw_value = str(raw_path.resolve())
         full_boxed_value = "NOT_CAPTURED"
         context_raw_value = str(focused_raw_path.resolve())
         context_boxed_value = str(focused_boxed_path.resolve())
@@ -592,6 +781,8 @@ def capture_comment_artifacts(page, locator, matched_selector: str, article_fall
 
 def fill_comment_box(page, comment_text: str):
     selectors = [
+        '[data-testid="comment-composer"] textarea',
+        '[data-testid="comment-composer"] [contenteditable="true"]',
         'textarea[placeholder="发布你的评论"]',
         'textarea',
         '[contenteditable="true"]',
@@ -613,7 +804,20 @@ def fill_comment_box(page, comment_text: str):
             return locator, selector
         except Exception:
             continue
-    return None, None
+
+    locator, selector = probe_direct_dom_composer(page)
+    if locator is None:
+        return None, None
+    try:
+        locator.click(timeout=1500, force=True)
+        try:
+            locator.fill(comment_text, timeout=2000)
+        except Exception:
+            locator.press("Control+A", timeout=1000)
+            locator.type(comment_text, delay=30, timeout=5000)
+        return locator, selector
+    except Exception:
+        return None, None
 
 
 def click_comment_button(page, force: bool = False):
@@ -699,6 +903,8 @@ def main():
     boxed_path = OUTPUT_DIR / f"{stem}_boxed.png"
     focused_raw_path = OUTPUT_DIR / f"{stem}_context_raw.png"
     focused_boxed_path = OUTPUT_DIR / f"{stem}_context_boxed.png"
+    run_started_ms = now_ms()
+    timings = build_timings_payload()
 
     print("[0/5] GUI env:", {
         "DISPLAY": os.environ.get("DISPLAY"),
@@ -716,8 +922,12 @@ def main():
         page.set_default_timeout(15000)
 
         print(f"[2/5] Opening: {args.url}", flush=True)
+        open_started_ms = now_ms()
         page.goto(args.url, wait_until="domcontentloaded")
+        timings["open_url_ms"] = max(now_ms() - open_started_ms, 0)
+        ready_started_ms = now_ms()
         ready_state = wait_for_page_ready(page, timeout_ms=4000)
+        timings["initial_ready_ms"] = max(now_ms() - ready_started_ms, 0)
         print(f"PAGE_READY={ready_state}", flush=True)
 
         if args.like:
@@ -733,9 +943,12 @@ def main():
         should_try_capture_first = args.capture_first_submit_fallback and args.submit
         if should_try_capture_first:
             print("[3/5] Fast path: trying to capture an existing matching comment before submitting...", flush=True)
+            locate_started_ms = now_ms()
             existing_locator, existing_selector, existing_phase = locate_comment(page, args.comment)
+            timings["locate_comment_ms"] = max(now_ms() - locate_started_ms, 0)
             if existing_locator is not None:
                 print(f"已复用现有评论，定位阶段: {existing_phase}，选择器: {existing_selector}", flush=True)
+                capture_started_ms = now_ms()
                 exit_code = capture_comment_artifacts(
                     page,
                     existing_locator,
@@ -747,6 +960,8 @@ def main():
                     focused_boxed_path,
                     full_page_primary=args.full_page_primary,
                 )
+                timings["capture_artifacts_ms"] = max(now_ms() - capture_started_ms, 0)
+                print_timings(timings, started_ms=run_started_ms)
                 print("[5/5++] Closing page/context while preserving login state in the persistent profile...", flush=True)
                 page.close()
                 browser.close()
@@ -755,18 +970,25 @@ def main():
 
         if args.submit:
             print("[3/5] Trying to auto-fill and auto-submit the comment...", flush=True)
+            fill_started_ms = now_ms()
             box_locator, box_selector = fill_comment_box(page, args.comment)
-            button_selector = None
+            timings["fill_comment_ms"] = max(now_ms() - fill_started_ms, 0)
             if box_locator is None:
+                composer_started_ms = now_ms()
                 button_selector = click_comment_button(page, force=True)
                 if button_selector:
                     print(f"已点击评论按钮以展开输入框，按钮选择器: {button_selector}", flush=True)
-                    page.wait_for_timeout(500)
+                    composer_selector = wait_for_comment_composer_ready(page)
+                    print(f"COMPOSER_READY={composer_selector or 'timeout-fallback'}", flush=True)
                 else:
                     print("未自动找到“评论”按钮，直接尝试定位评论输入框。", flush=True)
+                timings["open_composer_ms"] = max(now_ms() - composer_started_ms, 0)
+                fill_started_ms = now_ms()
                 box_locator, box_selector = fill_comment_box(page, args.comment)
+                timings["fill_comment_ms"] += max(now_ms() - fill_started_ms, 0)
             if box_locator is None:
                 print("仍未找到评论输入框。", flush=True)
+                print_timings(timings, started_ms=run_started_ms)
                 browser.close()
                 sys.exit(4)
             print(f"已填入评论，输入框选择器: {box_selector}", flush=True)
@@ -774,10 +996,14 @@ def main():
             submit_selector = click_comment_button(page, force=True)
             if not submit_selector:
                 print("未自动找到可提交的“评论”按钮。", flush=True)
+                print_timings(timings, started_ms=run_started_ms)
                 browser.close()
                 sys.exit(5)
             print(f"已点击评论按钮，按钮选择器: {submit_selector}", flush=True)
-            page.wait_for_timeout(1200)
+            submit_wait_started_ms = now_ms()
+            submit_ready_state = wait_for_after_submit_signal(page, args.comment)
+            timings["submit_wait_ms"] = max(now_ms() - submit_wait_started_ms, 0)
+            print(f"POST_SUBMIT_READY={submit_ready_state}", flush=True)
         elif args.capture_only:
             print("[3/5] Capture-only mode: skipping comment submission and locating existing comment only...", flush=True)
         else:
@@ -790,16 +1016,20 @@ def main():
         print("[4/5] Trying to locate your comment on the page...", flush=True)
         page.bring_to_front()
 
+        locate_started_ms = now_ms()
         locator, selector, locate_phase = locate_comment(page, args.comment)
+        timings["locate_comment_ms"] = max(now_ms() - locate_started_ms, 0)
         if locator is None:
             print("未能直接定位到评论文本。正在截全页原图，供后续人工检查。", flush=True)
             page.screenshot(path=str(raw_path), full_page=True)
             print(f"RAW_SCREENSHOT={raw_path.resolve()}", flush=True)
             print("BOXED_SCREENSHOT=NOT_FOUND", flush=True)
+            print_timings(timings, started_ms=run_started_ms)
             browser.close()
             sys.exit(2)
 
         print(f"找到评论，定位阶段: {locate_phase}，使用选择器: {selector}", flush=True)
+        capture_started_ms = now_ms()
         exit_code = capture_comment_artifacts(
             page,
             locator,
@@ -811,6 +1041,8 @@ def main():
             focused_boxed_path,
             full_page_primary=args.full_page_primary,
         )
+        timings["capture_artifacts_ms"] = max(now_ms() - capture_started_ms, 0)
+        print_timings(timings, started_ms=run_started_ms)
         print("[5/5++] Closing page/context while preserving login state in the persistent profile...", flush=True)
         page.close()
         browser.close()
